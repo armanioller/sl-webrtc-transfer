@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SL File Transfer HUD</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #0d0d1a;
+    color: #d0d0e0;
+    padding: 10px;
+    font-size: 11px;
+    overflow-x: hidden;
+  }
+  .hdr {
+    text-align: center;
+    color: #00d4ff;
+    font-size: 13px;
+    margin-bottom: 8px;
+    font-weight: bold;
+  }
+  .box {
+    background: #16162a;
+    border: 1px solid #252545;
+    border-radius: 5px;
+    padding: 8px;
+    margin-bottom: 8px;
+  }
+  .lbl {
+    display: block;
+    color: #8080a0;
+    font-size: 10px;
+    margin-bottom: 3px;
+    margin-top: 6px;
+  }
+  input[type="text"], input[type="file"], textarea {
+    width: 100%;
+    background: #0f0f20;
+    border: 1px solid #303055;
+    color: #e0e0f0;
+    padding: 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  input[type="file"] { padding: 3px; }
+  textarea { resize: vertical; }
+  button {
+    background: #00d4ff;
+    color: #0d0d1a;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: bold;
+    margin-top: 5px;
+  }
+  button:hover { background: #33ddff; }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; }
+  button.sm { padding: 4px 8px; font-size: 10px; }
+  .row { display: flex; gap: 5px; }
+  .row > * { flex: 1; }
+  .sts {
+    text-align: center;
+    padding: 4px;
+    border-radius: 3px;
+    margin-top: 5px;
+    font-size: 10px;
+    font-weight: bold;
+  }
+  .sts.idle { background: #222244; color: #8888aa; }
+  .sts.conn { background: rgba(0,212,255,0.15); color: #00d4ff; }
+  .sts.ok   { background: rgba(46,213,115,0.15); color: #2ed573; }
+  .sts.err  { background: rgba(255,71,87,0.15); color: #ff4757; }
+  .sts.warn { background: rgba(255,165,2,0.15); color: #ffa502; }
+  #log {
+    height: 120px;
+    overflow-y: auto;
+    background: #0a0a18;
+    border: 1px solid #1e1e38;
+    border-radius: 3px;
+    padding: 5px;
+    font-family: monospace;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+  #log .e { margin-bottom: 1px; }
+  #log .t { color: #555; }
+  #log .i { color: #00d4ff; }
+  #log .g { color: #2ed573; }
+  #log .r { color: #ff4757; }
+  #log .y { color: #ffa502; }
+  #log .w { color: #d0d0e0; }
+  #prog {
+    height: 6px;
+    background: #0a0a18;
+    border-radius: 3px;
+    margin-top: 5px;
+    overflow: hidden;
+    display: none;
+  }
+  #prog > div { height: 100%; width: 0%; background: #00d4ff; transition: width .2s; }
+  .files { margin-top: 4px; }
+  .files > div {
+    font-size: 10px; padding: 3px 5px; background: #0f0f25;
+    margin-top: 3px; border-radius: 2px; border-left: 2px solid #00d4ff;
+  }
+  .small { font-size: 9px; color: #555; margin-top: 3px; }
+  .hidden { display: none !important; }
+  .tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+  .tabs > button { flex: 1; margin-top: 0; background: #1e1e3a; color: #888; }
+  .tabs > button.on { background: #00d4ff; color: #0d0d1a; }
+  .tab-panel.hidden { display: none; }
+</style>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+
+<div class="hdr">📡 SL P2P File Transfer</div>
+
+<!-- TAB NAV -->
+<div class="tabs">
+  <button class="on" onclick="showTab('main')" id="tab-main">Principal</button>
+  <button onclick="showTab('sig')" id="tab-sig">Sinalização</button>
+  <button onclick="showTab('debug')" id="tab-debug">Debug</button>
+</div>
+
+<!-- TAB: MAIN -->
+<div id="panel-main" class="tab-panel">
+  <div class="box">
+    <span class="lbl">Seu Avatar UUID</span>
+    <input type="text" id="my-uuid" value="Detectando..." readonly>
+
+    <span class="lbl">UUID do Avatar Destino</span>
+    <input type="text" id="target-uuid" placeholder="00000000-0000-0000-0000-000000000000">
+
+    <span class="lbl">Como conectar</span>
+    <div class="row">
+      <button onclick="beHost()" id="btn-host">🏁 Criar Oferta</button>
+      <button onclick="beGuest()" id="btn-guest">🔌 Aceitar Oferta</button>
+    </div>
+    <div class="sts idle" id="status">Desconectado</div>
+  </div>
+
+  <div class="box">
+    <span class="lbl">Arquivo para Enviar</span>
+    <input type="file" id="file-input">
+    <button onclick="sendFile()" id="btn-send" disabled>📤 Enviar</button>
+    <div id="prog"><div id="prog-fill"></div></div>
+    <div class="small" id="file-info">Selecione um arquivo</div>
+  </div>
+
+  <div class="box">
+    <span class="lbl">Arquivos Recebidos</span>
+    <div class="files" id="received"><div class="small">Nenhum arquivo recebido ainda</div></div>
+  </div>
+</div>
+
+<!-- TAB: SIGNALING -->
+<div id="panel-sig" class="tab-panel hidden">
+  <div class="box">
+    <span class="lbl">Modo de Sinalização</span>
+    <div class="row">
+      <button onclick="setMode('auto')" id="mode-auto" class="on">Auto (LSL)</button>
+      <button onclick="setMode('manual')" id="mode-manual">Manual (Copy/Paste)</button>
+    </div>
+
+    <div id="manual-panel" class="hidden">
+      <span class="lbl">Seu SDP (copie e envie ao outro):</span>
+      <textarea id="local-sdp" rows="4" readonly></textarea>
+      <button onclick="copyLocalSDP()" class="sm">Copiar</button>
+
+      <span class="lbl">SDP do outro (cole aqui):</span>
+      <textarea id="remote-sdp" rows="4" placeholder="Cole o SDP recebido..."></textarea>
+      <button onclick="applyRemoteSDP()">Aplicar SDP</button>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: DEBUG -->
+<div id="panel-debug" class="tab-panel hidden">
+  <div class="box">
+    <span class="lbl">Log de Eventos</span>
+    <div id="log"></div>
+    <div class="row">
+      <button class="sm" onclick="clearLog()">Limpar</button>
+      <button class="sm" onclick="testLSL()">Testar LSL</button>
+      <button class="sm" onclick="resetConn()">Reset</button>
+    </div>
+  </div>
+  <div class="box">
+    <span class="lbl">MQTT Status</span>
+    <div class="sts idle" id="mqtt-status">Conectando ao broker...</div>
+  </div>
+</div>
+
+<script>
+// ==========================================================
+// CONFIG & STATE
+// ==========================================================
+const $ = id => document.getElementById(id);
+const QP = new URLSearchParams(location.search);
+let LSL_URL = QP.get('lsl') || null;
+
+let mode = 'auto';           // 'auto' = via LSL, 'manual' = copy/paste
+let pc = null;
+let dc = null;               // send data channel
+let rc = null;               // receive data channel
+let myUUID = 'unknown';
+let targetUUID = '';
+let chunkBuffer = {};        // Reassembly de mensagens partidas
+let fileRx = { chunks: [], name: '', size: 0, got: 0 };
+
+// ==========================================================
+// LOGGING
+// ==========================================================
+function log(msg, type='i') {
+  const el = $('log');
+  const t = new Date().toLocaleTimeString('pt-BR',{hour12:false});
+  const cls = {i:'i',g:'g',r:'r',y:'y',w:'w'}[type] || 'i';
+  el.innerHTML += `<div class="e"><span class="t">[${t}]</span> <span class="${cls}">${msg}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() { $('log').innerHTML = ''; }
+
+// ==========================================================
+// MQTT COMMUNICATION (Global Signaling)
+// ==========================================================
+const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+let mqttClient = null;
+
+function setupMQTT() {
+  if (myUUID === 'unknown') return;
+
+  log('Conectando ao broker MQTT...', 'w');
+  mqttClient = mqtt.connect(BROKER_URL);
+
+  mqttClient.on('connect', () => {
+    const topic = 'slwebrtc/' + myUUID;
+    mqttClient.subscribe(topic);
+    $('mqtt-status').textContent = '✅ Conectado ao Broker Global';
+    $('mqtt-status').className = 'sts ok';
+    log('MQTT Conectado! Escutando: ' + topic, 'g');
+  });
+
+  mqttClient.on('message', (topic, message) => {
+    const raw = message.toString();
+    // Reassembly check (caso ainda venha algo chunkado)
+    if (raw.startsWith('PART|')) {
+      const parts = raw.split('|');
+      if (parts.length < 4) return;
+      const idx = parseInt(parts[1]), total = parseInt(parts[2]);
+      const payload = parts.slice(3).join('|');
+      const key = 'rx';
+      if (!chunkBuffer[key]) chunkBuffer[key] = { parts: [], total };
+      chunkBuffer[key].parts[idx] = payload;
+      if (chunkBuffer[key].parts.filter(Boolean).length === total) {
+        const full = chunkBuffer[key].parts.join('');
+        delete chunkBuffer[key];
+        processSDP(full);
+      }
+      return;
+    }
+    processSDP(raw);
+  });
+
+  mqttClient.on('error', (err) => {
+    $('mqtt-status').textContent = '❌ Erro no MQTT';
+    $('mqtt-status').className = 'sts err';
+    log('Erro MQTT: ' + err.message, 'r');
+  });
+}
+
+async function sendSig(data) {
+  const tgt = $('target-uuid').value.trim();
+  if (!tgt) { log('Informe o UUID do destino!', 'r'); return false; }
+  if (mode === 'auto' && mqttClient && mqttClient.connected) {
+    const topic = 'slwebrtc/' + tgt;
+    mqttClient.publish(topic, data);
+    return true;
+  }
+  return false;
+}
+
+function processSDP(raw) {
+  try {
+    const msg = JSON.parse(raw);
+    log('Sinalizacao: ' + (msg.type || 'ice'), 'y');
+    applySignal(msg);
+  } catch(e) {
+    log('SDP invalido: ' + e.message, 'r');
+  }
+}
+
+// ==========================================================
+// WEBRTC
+// ==========================================================
+const ICE_CFG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
+};
+const CHUNK_SZ = 16384;
+
+function updateStatus(text, cls) {
+  const el = $('status');
+  el.textContent = text;
+  el.className = 'sts ' + cls;
+}
+
+async function createPC() {
+  if (pc) pc.close();
+  pc = new RTCPeerConnection(ICE_CFG);
+
+  pc.onicecandidate = async ({candidate}) => {
+    if (!candidate) {
+      if (mode === 'manual') {
+        $('local-sdp').value = JSON.stringify(pc.localDescription);
+        log('SDP pronto! Copie e envie.', 'g');
+      }
+      return;
+    }
+    const payload = JSON.stringify({ type: 'ice', candidate });
+    if (mode === 'auto') {
+      sendSig(payload);
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    log('State: ' + pc.connectionState, 'w');
+    if (pc.connectionState === 'connected') {
+      updateStatus('P2P Conectado!', 'ok');
+      $('btn-send').disabled = false;
+    } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      updateStatus('Desconectado', 'idle');
+      $('btn-send').disabled = true;
+    }
+  };
+
+  pc.ondatachannel = (e) => {
+    rc = e.channel;
+    setupRxChannel(rc);
+    log('Canal de recebimento aberto', 'g');
+  };
+
+  pc.onnegotiationneeded = async () => {
+    try {
+      await pc.setLocalDescription();
+      const payload = JSON.stringify(pc.localDescription);
+      if (mode === 'auto') {
+        sendSig(payload);
+      } else {
+        $('local-sdp').value = JSON.stringify(pc.localDescription);
+        log('Negociacao: ' + pc.localDescription.type, 'y');
+      }
+    } catch(err) { log('Negoc error: ' + err.message, 'r'); }
+  };
+
+  return pc;
+}
+
+function setupTxChannel(ch) {
+  dc = ch;
+  ch.onopen = () => { log('DataChannel ABERTO!', 'g'); updateStatus('Canal pronto!', 'ok'); };
+  ch.onclose = () => { log('DataChannel fechado', 'w'); };
+}
+
+function setupRxChannel(ch) {
+  ch.onmessage = (e) => {
+    if (typeof e.data === 'string') {
+      try {
+        const meta = JSON.parse(e.data);
+        if (meta.type === 'file-start') {
+          fileRx = { chunks: [], name: meta.name, size: meta.size, got: 0 };
+          log(`Recebendo: ${meta.name} (${meta.size} bytes)`, 'g');
+          updateProg(0);
+        } else if (meta.type === 'file-done') {
+          const blob = new Blob(fileRx.chunks);
+          download(blob, fileRx.name);
+          addFile(fileRx.name, blob.size);
+          log('Arquivo completo!', 'g');
+          updateProg(100);
+        } else if (meta.type === 'chat') {
+          log('Chat: ' + meta.text, 'w');
+        }
+      } catch { log('Msg: ' + e.data, 'w'); }
+    } else {
+      fileRx.chunks.push(e.data);
+      fileRx.got += e.data.byteLength;
+      if (fileRx.size > 0) updateProg(Math.round(fileRx.got / fileRx.size * 100));
+    }
+  };
+}
+
+async function applySignal(msg) {
+  if (!pc) return;
+  try {
+    if (msg.type === 'offer') {
+      await pc.setRemoteDescription(msg);
+      await pc.setLocalDescription();
+      const payload = JSON.stringify(pc.localDescription);
+      if (mode === 'auto') sendSig(payload);
+      else { $('local-sdp').value = payload; log('Answer gerado!', 'g'); }
+    } else if (msg.type === 'answer') {
+      await pc.setRemoteDescription(msg);
+    } else if (msg.type === 'ice' && msg.candidate) {
+      await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+    }
+  } catch(err) { log('Sig error: ' + err.message, 'r'); }
+}
+
+// ==========================================================
+// UI ACTIONS
+// ==========================================================
+async function beHost() {
+  if (!$('target-uuid').value.trim()) { log('Informe o UUID destino!', 'r'); return; }
+  await createPC();
+  const ch = pc.createDataChannel('fileTransfer', { ordered: true });
+  setupTxChannel(ch);
+  updateStatus('Criando oferta...', 'conn');
+  log('Oferta criada, aguardando ICE...', 'i');
+}
+
+async function beGuest() {
+  if (!$('target-uuid').value.trim()) { log('Informe o UUID destino!', 'r'); return; }
+  await createPC();
+  updateStatus('Aguardando oferta...', 'conn');
+  log('Pronto para receber oferta. Aguardando sinalizacao...', 'i');
+}
+
+async function applyRemoteSDP() {
+  const val = $('remote-sdp').value.trim();
+  if (!val) return;
+  try { await applySignal(JSON.parse(val)); $('remote-sdp').value = ''; }
+  catch(e) { log('SDP invalido: ' + e.message, 'r'); }
+}
+
+function copyLocalSDP() {
+  $('local-sdp').select();
+  document.execCommand('copy');
+  log('SDP copiado!', 'g');
+}
+
+async function sendFile() {
+  const inp = $('file-input');
+  if (!inp.files.length) { log('Selecione um arquivo!', 'r'); return; }
+  if (!dc || dc.readyState !== 'open') { log('Canal nao aberto', 'r'); return; }
+
+  const file = inp.files[0];
+  log(`Enviando ${file.name} (${file.size} bytes)`, 'g');
+  updateProg(0);
+
+  dc.send(JSON.stringify({ type: 'file-start', name: file.name, size: file.size }));
+
+  const buf = await file.arrayBuffer();
+  let off = 0, sent = 0;
+  while (off < buf.byteLength) {
+    const chunk = buf.slice(off, Math.min(off + CHUNK_SZ, buf.byteLength));
+    dc.send(chunk);
+    off += CHUNK_SZ; sent += chunk.byteLength;
+    updateProg(Math.round(sent / file.size * 100));
+    if (off % (CHUNK_SZ * 8) === 0) await new Promise(r => setTimeout(r, 1));
+  }
+  dc.send(JSON.stringify({ type: 'file-done' }));
+  log('Envio completo!', 'g');
+}
+
+function updateProg(pct) {
+  $('prog').style.display = 'block';
+  $('prog-fill').style.width = pct + '%';
+  $('file-info').textContent = pct + '%';
+}
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function addFile(name, size) {
+  const el = $('received');
+  if (el.querySelector('.small')) el.innerHTML = '';
+  const sz = size > 1048576 ? (size/1048576).toFixed(1)+' MB' : size > 1024 ? (size/1024).toFixed(1)+' KB' : size+' B';
+  const div = document.createElement('div');
+  div.textContent = `${name} (${sz})`;
+  el.appendChild(div);
+}
+
+// ==========================================================
+// TABS & MODE
+// ==========================================================
+function showTab(name) {
+  ['main','sig','debug'].forEach(t => {
+    $(`panel-${t}`).classList.toggle('hidden', t !== name);
+    $(`tab-${t}`).classList.toggle('on', t === name);
+  });
+}
+
+function setMode(m) {
+  mode = m;
+  $('mode-auto').className = m==='auto' ? 'on' : '';
+  $('mode-manual').className = m==='manual' ? 'on' : '';
+  $('manual-panel').classList.toggle('hidden', m !== 'manual');
+  log('Modo: ' + (m==='auto' ? 'Auto (LSL RegionSayTo)' : 'Manual (Copy/Paste)'), 'g');
+}
+
+// ==========================================================
+// TESTS & RESET
+// ==========================================================
+function resetConn() {
+  if (pc) { pc.close(); pc = null; }
+  dc = null; rc = null;
+  updateStatus('Desconectado', 'idle');
+  $('btn-send').disabled = true;
+  log('Conexao resetada', 'y');
+}
+
+// ==========================================================
+// INIT
+// ==========================================================
+function init() {
+  // Detecta UUID via query param (vem do LSL setupMedia)
+  const ownerFromURL = QP.get('owner');
+  if (ownerFromURL) {
+    myUUID = ownerFromURL;
+    $('my-uuid').value = ownerFromURL;
+    log('UUID detectado: ' + ownerFromURL, 'g');
+    setupMQTT();
+  } else {
+    $('my-uuid').value = 'UUID não detectado';
+    $('mqtt-status').textContent = '⚠️ Sem UUID na URL. A HUD LSL injeta isso automaticamente.';
+    $('mqtt-status').className = 'sts warn';
+    log('Abra usando a HUD dentro do Second Life.', 'y');
+  }
+
+  log('HUD WebRTC inicializada', 'i');
+}
+
+init();
+</script>
+</body>
+</html>
