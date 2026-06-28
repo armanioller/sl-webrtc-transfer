@@ -279,16 +279,31 @@ async function sendSig(data) {
   if (!tgt) { log('Informe o UUID do destino!', 'r'); return false; }
   if (mode === 'auto' && mqttClient && mqttClient.connected) {
     const topic = 'slwebrtc/' + tgt;
-    mqttClient.publish(topic, data);
+    // Envia o UUID do remetente junto com a mensagem
+    const wrapper = JSON.stringify({ sender: myUUID, payload: data });
+    mqttClient.publish(topic, wrapper);
     return true;
   }
   return false;
 }
 
-function processSDP(raw) {
+async function processSDP(raw) {
   try {
-    const msg = JSON.parse(raw);
-    log('Sinalizacao: ' + (msg.type || 'ice'), 'y');
+    const wrapper = JSON.parse(raw);
+    const sender = wrapper.sender;
+    const msg = JSON.parse(wrapper.payload);
+    
+    log('Sinalizacao: ' + (msg.type || 'ice') + ' de ' + sender.substring(0,8), 'y');
+    
+    // Auto-preenche o destino e auto-aceita se for uma oferta nova
+    if (sender && $('target-uuid').value !== sender) {
+      $('target-uuid').value = sender;
+    }
+    if (!pc && msg.type === 'offer') {
+      log('Auto-aceitando oferta...', 'i');
+      await beGuest();
+    }
+    
     applySignal(msg);
   } catch(e) {
     log('SDP invalido: ' + e.message, 'r');
