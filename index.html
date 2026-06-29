@@ -395,8 +395,7 @@ function setupRxChannel(ch) {
           updateProg(0);
         } else if (meta.type === 'file-done') {
           const blob = new Blob(fileRx.chunks);
-          download(blob, fileRx.name);
-          addFile(fileRx.name, blob.size);
+          addFile(blob, fileRx.name, fileRx.size);
           log('Arquivo completo!', 'g');
           updateProg(100);
         } else if (meta.type === 'chat') {
@@ -490,19 +489,53 @@ function updateProg(pct) {
   $('file-info').textContent = pct + '%';
 }
 
-function download(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function addFile(name, size) {
+function addFile(blob, name, size) {
   const el = $('received');
   if (el.querySelector('.small')) el.innerHTML = '';
   const sz = size > 1048576 ? (size/1048576).toFixed(1)+' MB' : size > 1024 ? (size/1024).toFixed(1)+' KB' : size+' B';
+  
   const div = document.createElement('div');
-  div.textContent = `${name} (${sz})`;
+  div.style.background = '#1a1a35';
+  div.style.padding = '8px';
+  div.style.marginTop = '8px';
+  div.style.borderRadius = '4px';
+  
+  const title = document.createElement('div');
+  title.textContent = `${name} (${sz})`;
+  title.style.fontWeight = 'bold';
+  title.style.marginBottom = '8px';
+  div.appendChild(title);
+
+  const url = URL.createObjectURL(blob);
+  const ext = name.split('.').pop().toLowerCase();
+  
+  if (['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '4px';
+    div.appendChild(img);
+  } else if (['mp4','webm','ogg'].includes(ext)) {
+    const vid = document.createElement('video');
+    vid.src = url;
+    vid.controls = true;
+    vid.style.maxWidth = '100%';
+    div.appendChild(vid);
+  } else if (['mp3','wav'].includes(ext)) {
+    const aud = document.createElement('audio');
+    aud.src = url;
+    aud.controls = true;
+    aud.style.width = '100%';
+    div.appendChild(aud);
+  } else {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.textContent = "Baixar (se suportado)";
+    a.style.color = '#00d4ff';
+    div.appendChild(a);
+  }
+  
   el.appendChild(div);
 }
 
